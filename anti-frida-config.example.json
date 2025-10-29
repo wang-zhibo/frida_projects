@@ -1,0 +1,23 @@
+{
+  "patch_strings": [
+    "FridaScriptEngine",
+    "GLib-GIO",
+    "GDBusProxy",
+    "GumScript",
+    "frida-agent",
+    "Frida",
+    "FRIDA",
+    "frida_rpc",
+    "gum-js-loop",
+    "thread_gum",
+    "GumInvocationListener",
+    "GumInvocationContext"
+  ],
+  "thread_names": [
+    ["gum-js-loop", 11],
+    ["gmain", 5],
+    ["gdbus", 5],
+    ["pool-frida", 11]
+  ]
+}
+
