@@ -11,7 +11,7 @@
  * 7. 系统命令执行功能
  * 8. 可选的 DEX 文件加载支持
  * 9. 自动绕过权限检查（可选）
- * 
+ * 注意 电话信息和位置信息需要在一定的app下才能获取到
  * 使用方法：
  * frida -U -f com.example.app -l get_device_info.js --no-pause
  */
