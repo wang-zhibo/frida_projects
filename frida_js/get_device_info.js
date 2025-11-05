@@ -89,6 +89,46 @@ function bypassPermissionCheck() {
                 };
             } catch (e) {}
             
+            // ============ Hook LocationManager 来绕过位置权限检查 ============
+            try {
+                var LocationManager = Java.use("android.location.LocationManager");
+                
+                // Hook getLastKnownLocation
+                if (LocationManager.getLastKnownLocation) {
+                    LocationManager.getLastKnownLocation.implementation = function(provider) {
+                        try {
+                            // 尝试直接调用原始方法
+                            return this.getLastKnownLocation.call(this, provider);
+                        } catch (e) {
+                            // 如果是权限错误，返回 null 而不是抛出异常
+                            if (e.message && e.message.indexOf("SecurityException") !== -1) {
+                                console.log("[权限绕过] 位置权限被阻止，但已抑制异常: " + provider);
+                                return null;
+                            }
+                            throw e;
+                        }
+                    };
+                }
+                
+                // Hook requestLocationUpdates (多个重载)
+                try {
+                    LocationManager.requestLocationUpdates.overload('java.lang.String', 'long', 'float', 'android.location.LocationListener').implementation = function(provider, minTime, minDistance, listener) {
+                        try {
+                            return this.requestLocationUpdates.call(this, provider, minTime, minDistance, listener);
+                        } catch (e) {
+                            if (e.message && e.message.indexOf("SecurityException") !== -1) {
+                                console.log("[权限绕过] 位置更新请求被阻止: " + provider);
+                            }
+                            // 不抛出异常
+                        }
+                    };
+                } catch (e) {}
+                
+                console.log("✓ LocationManager Hook 已启用");
+            } catch (e) {
+                console.log("Hook LocationManager 失败: " + e);
+            }
+            
             // ============ 核心：Hook TelephonyManager 方法来绕过权限检查 ============
             try {
                 var TelephonyManager = Java.use("android.telephony.TelephonyManager");
@@ -934,6 +974,218 @@ function getBasicInfo() {
                 }
             } catch (e) {
                 console.log("获取网络信息时出错: " + e);
+            }
+            
+            // 位置信息（经纬度）
+            try {
+                console.log("\n[位置信息]");
+                
+                var LocationManager = Java.use("android.location.LocationManager");
+                var locationService = context.getSystemService("location");
+                
+                if (locationService) {
+                    var locationManager = Java.cast(locationService, LocationManager);
+                    
+                    // 检查位置服务是否开启
+                    try {
+                        var isGpsEnabled = locationManager.isProviderEnabled("gps");
+                        var isNetworkEnabled = locationManager.isProviderEnabled("network");
+                        
+                        console.log("GPS 状态: " + (isGpsEnabled ? "已开启" : "已关闭"));
+                        console.log("网络定位状态: " + (isNetworkEnabled ? "已开启" : "已关闭"));
+                        
+                        if (!isGpsEnabled && !isNetworkEnabled) {
+                            console.log("⚠️ 位置服务未开启，无法获取经纬度");
+                        }
+                    } catch (e) {
+                        console.log("检查位置服务状态出错: " + e.message);
+                    }
+                    
+                    // 获取所有可用的位置提供者
+                    try {
+                        var providers = locationManager.getAllProviders();
+                        if (providers && providers.size() > 0) {
+                            var providerList = [];
+                            for (var i = 0; i < providers.size(); i++) {
+                                providerList.push(providers.get(i));
+                            }
+                            console.log("位置提供者: " + providerList.join(", "));
+                        }
+                    } catch (e) {}
+                    
+                    // 尝试获取最后已知位置
+                    var locationFound = false;
+                    var providers = ["gps", "network", "passive"];
+                    
+                    for (var i = 0; i < providers.length; i++) {
+                        var location = null;
+                        
+                        // 方法 1: 标准 API
+                        try {
+                            location = locationManager.getLastKnownLocation(providers[i]);
+                        } catch (e) {
+                            // 如果标准方法失败，尝试使用反射
+                            if (e.message && e.message.indexOf("SecurityException") !== -1) {
+                                console.log("[权限绕过] 尝试使用反射获取 " + providers[i] + " 位置...");
+                                
+                                // 方法 2: 通过反射调用
+                                try {
+                                    var LocationManager = Java.use("android.location.LocationManager");
+                                    var Method = Java.use("java.lang.reflect.Method");
+                                    var Class = Java.use("java.lang.Class");
+                                    
+                                    var methods = LocationManager.class.getDeclaredMethods();
+                                    for (var j = 0; j < methods.length; j++) {
+                                        var method = methods[j];
+                                        if (method.getName() === "getLastKnownLocation") {
+                                            method.setAccessible(true);
+                                            try {
+                                                location = method.invoke(locationManager, providers[i]);
+                                                if (location) {
+                                                    console.log("[权限绕过] ✓ 反射成功获取位置");
+                                                    break;
+                                                }
+                                            } catch (e2) {}
+                                        }
+                                    }
+                                } catch (e2) {
+                                    console.log("[权限绕过] 反射失败: " + e2.message);
+                                }
+                            }
+                        }
+                        
+                        if (location) {
+                            var latitude = location.getLatitude();
+                            var longitude = location.getLongitude();
+                            var accuracy = location.getAccuracy();
+                            var altitude = location.getAltitude();
+                            var time = location.getTime();
+                            
+                            console.log("\n━━━━━━ " + providers[i].toUpperCase() + " 位置 ━━━━━━");
+                            console.log("纬度 (Latitude): " + latitude);
+                            console.log("经度 (Longitude): " + longitude);
+                            console.log("精度: " + accuracy.toFixed(2) + " 米");
+                            console.log("海拔: " + altitude.toFixed(2) + " 米");
+                            
+                            // 格式化时间
+                            try {
+                                var Date = Java.use("java.util.Date");
+                                var SimpleDateFormat = Java.use("java.text.SimpleDateFormat");
+                                var date = Date.$new(time);
+                                var sdf = SimpleDateFormat.$new("yyyy-MM-dd HH:mm:ss");
+                                console.log("定位时间: " + sdf.format(date));
+                            } catch (e) {
+                                console.log("定位时间戳: " + time);
+                            }
+                            
+                            // 计算位置年龄
+                            var SystemClock = Java.use("android.os.SystemClock");
+                            var currentTime = SystemClock.elapsedRealtime();
+                            var locationAge = currentTime - location.getElapsedRealtimeNanos() / 1000000;
+                            console.log("位置更新于: " + (locationAge / 1000).toFixed(0) + " 秒前");
+                            
+                            // 如果有速度和方向信息
+                            try {
+                                if (location.hasSpeed()) {
+                                    var speed = location.getSpeed();
+                                    console.log("速度: " + (speed * 3.6).toFixed(2) + " km/h");
+                                }
+                                if (location.hasBearing()) {
+                                    var bearing = location.getBearing();
+                                    console.log("方向: " + bearing.toFixed(2) + "°");
+                                }
+                            } catch (e) {}
+                            
+                            locationFound = true;
+                        }
+                    }
+                    
+                    // 如果前面的方法都失败，尝试从系统数据库读取
+                    if (!locationFound) {
+                        console.log("\n尝试从系统数据库获取位置信息...");
+                        
+                        try {
+                            var Settings = Java.use("android.provider.Settings$Secure");
+                            var contentResolver = context.getContentResolver();
+                            
+                            // 尝试读取位置模式
+                            try {
+                                var locationMode = Settings.getInt(contentResolver, "location_mode");
+                                var locationModes = {
+                                    0: "关闭",
+                                    1: "仅设备",
+                                    2: "省电",
+                                    3: "高精度"
+                                };
+                                console.log("位置模式: " + (locationModes[locationMode] || "未知"));
+                            } catch (e) {}
+                            
+                            // 尝试读取 GPS 提供者的位置（某些设备会缓存）
+                            try {
+                                var Uri = Java.use("android.net.Uri");
+                                var Cursor = Java.use("android.database.Cursor");
+                                
+                                // 构建查询 URI
+                                var uri = Uri.parse("content://com.google.android.gms.location/provider/location");
+                                var cursor = contentResolver.query(uri, null, null, null, null);
+                                
+                                if (cursor && cursor.moveToFirst()) {
+                                    console.log("\n━━━━━━ 系统缓存位置 ━━━━━━");
+                                    
+                                    // 尝试读取列
+                                    var columnCount = cursor.getColumnCount();
+                                    for (var i = 0; i < columnCount; i++) {
+                                        try {
+                                            var columnName = cursor.getColumnName(i);
+                                            var value = cursor.getString(i);
+                                            
+                                            if (value && value.length > 0 && value.length < 100) {
+                                                console.log(columnName + ": " + value);
+                                                
+                                                if (columnName.toLowerCase().indexOf("lat") !== -1) {
+                                                    locationFound = true;
+                                                }
+                                            }
+                                        } catch (e) {}
+                                    }
+                                    cursor.close();
+                                }
+                            } catch (e) {}
+                            
+                        } catch (e) {}
+                    }
+                    
+                    if (!locationFound) {
+                        console.log("\n⚠️  无法获取位置信息");
+                        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        console.log("可能原因:");
+                        console.log("  1. 位置服务未开启");
+                        console.log("  2. 缺少位置权限 (ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION)");
+                        console.log("  3. 设备从未获取过位置信息");
+                        console.log("  4. 位置信息已过期被清除");
+                        console.log("  5. 系统安全限制（Android 10+ 后台位置限制）");
+                        console.log("\n建议:");
+                        console.log("  • 手动授予应用位置权限");
+                        console.log("  • 打开位置服务");
+                        console.log("  • 使用地图应用获取一次位置后再试");
+                        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    }
+                    
+                    // 获取位置更新的额外信息
+                    try {
+                        var Criteria = Java.use("android.location.Criteria");
+                        var criteria = Criteria.$new();
+                        criteria.setAccuracy(Criteria.ACCURACY_FINE.value);
+                        var bestProvider = locationManager.getBestProvider(criteria, true);
+                        
+                        if (bestProvider) {
+                            console.log("\n最佳位置提供者: " + bestProvider);
+                        }
+                    } catch (e) {}
+                }
+            } catch (e) {
+                console.log("获取位置信息时出错: " + e);
+                console.log("堆栈: " + e.stack);
             }
             
             // 代理检测
